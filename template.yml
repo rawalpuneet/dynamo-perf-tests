@@ -1,0 +1,154 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: An Amazon API Gateway REST API that integrates with an Amazon DynamoDB table.
+Parameters:
+  AppName:
+    Type: String
+    Default: ddb-load-test
+    Description: API that can be used to test dynamodb
+  StageName:
+    Type: String
+    Default: v1
+    Description: Name of API stage.
+Resources:
+  DynamoDBTable:
+    Type: 'AWS::DynamoDB::Table'
+    Properties:
+      TableName: traffic_test
+      # A list of attributes that describe the key schema for the DynamoDB table and indexes.
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: "HASH"
+        - AttributeName: SK
+          KeyType: "RANGE"          
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+      TimeToLiveSpecification:
+          AttributeName: TTL
+          Enabled: true
+  APIGatewayRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Action:
+              - 'sts:AssumeRole'
+            Effect: Allow
+            Principal:
+              Service:
+                - apigateway.amazonaws.com
+      Policies:
+        - PolicyName: APIGatewayDynamoDBPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'dynamodb:PutItem'
+                  - 'dynamodb:Query'
+                # Including * in the resource Arn allows access to the DynamoDB table and indexes
+                Resource: !Sub
+                  - '${varTableArn}*'
+                  - varTableArn: !GetAtt DynamoDBTable.Arn
+  Api:
+    Type: 'AWS::ApiGateway::RestApi'
+    Properties:
+      Name: !Sub '${AppName}'
+      ApiKeySourceType: HEADER
+  LoadResource:
+    Type: 'AWS::ApiGateway::Resource'
+    Properties:
+      RestApiId: !Ref Api
+      ParentId: !GetAtt Api.RootResourceId
+      PathPart: 'load'
+  LoadMethodPost:
+    Type: 'AWS::ApiGateway::Method'
+    Properties:
+      RestApiId: !Ref Api
+      ResourceId: !Ref LoadResource
+      HttpMethod: POST
+      ApiKeyRequired: true
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS
+        Credentials: !GetAtt APIGatewayRole.Arn
+        # Should always be POST when integrating with AWS services
+        IntegrationHttpMethod: POST
+        # More info: https://docs.aws.amazon.com/apigateway/api-reference/resource/integration/
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:dynamodb:action/PutItem'
+        PassthroughBehavior: WHEN_NO_TEMPLATES
+        RequestTemplates:
+          # Build the structure of the request that is sent when calling DynamoDB PutItem
+          # Using single-line, stringified JSON as the mapping template
+          # Example body when making API request: {"artist": "The Beatles", "album": "Abbey Road"}
+          # Use the unique id of the API context variable (eg: $context.requestId) as the DynamoDB item id
+          application/json: "{\"TableName\":\"traffic_test\",\"Item\":{\"PK\":{\"S\":\"PK.$context.requestId\"},\"SK\":{\"S\":\"SK.$context.requestId\"},\"json\":{\"S\":\"$input.path('$.json')\"},\"TTL\":{\"N\":\"$input.path('$.TTL')\"}}}"
+        IntegrationResponses:
+          - StatusCode: '200'
+            ResponseTemplates:
+              application/json: "{}"
+      MethodResponses:
+        - StatusCode: '200'
+  ApiDeployment:
+    Type: 'AWS::ApiGateway::Deployment'
+    DependsOn:
+      - LoadMethodPost    
+    Properties:
+      RestApiId: !Ref Api
+      StageName: !Sub '${StageName}'
+      StageDescription:
+        LoggingLevel: INFO
+        MetricsEnabled: True
+
+  ApiKey:
+    Type: 'AWS::ApiGateway::ApiKey'
+    DependsOn:
+      - ApiDeployment
+    Properties:
+      Enabled: true
+      Name: !Sub '${AppName}-apikey'
+      StageKeys:
+        - RestApiId: !Ref Api
+          StageName: !Sub '${StageName}'
+  ApiUsagePlan:
+    Type: 'AWS::ApiGateway::UsagePlan'
+    DependsOn:
+      - ApiDeployment
+    Properties:
+      ApiStages:
+        - ApiId: !Ref Api
+          Stage: !Sub '${StageName}'
+      Throttle:
+        RateLimit: 500
+        BurstLimit: 1000
+      UsagePlanName: !Sub '${AppName}-usage-plan'
+      Quota:
+        Limit: 10000
+        Period: MONTH
+  ApiUsagePlanKey:
+    Type: 'AWS::ApiGateway::UsagePlanKey'
+    Properties:
+      KeyType: API_KEY
+      KeyId: !Ref ApiKey
+      UsagePlanId: !Ref ApiUsagePlan
+  MyLogGroup:
+      Type: AWS::Logs::LogGroup
+      Properties:
+        LogGroupName: /aws/apigateway/DDB-API-Gateway-Access
+        RetentionInDays: 1
+
+Outputs:
+  ApiRootUrl:
+    Description: Root Url of the API
+    Value: !Sub 
+      - 'https://${ApiId}.execute-api.${AWS::Region}.amazonaws.com/${StageName}'
+      - ApiId: !Ref Api
+  ApiKeyId:
+    Description: API Key Id
+    Value: !Ref ApiKey
