@@ -11,3 +11,4 @@ class putItem(HttpUser):
         payload['TTL'] = str(time.time() + 60 * 10)
         payload['json'] = csv_payload.to_csv(index=False).replace("\n","")
         self.client.post("/v1/load", headers=headers, data=json.dumps(payload) )
+        time.sleep(0.200)
