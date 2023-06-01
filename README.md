@@ -14,6 +14,14 @@
 
 ## How it works
 
+```
+cd perf
+locust -f locustfile.py,figure1.py
+```
+### Running headless mode
+```
+locust -f locustfile.py,figure1.py --headless --host https://zutctx9ynd.execute-api.us-east-1.amazonaws.com
+```
 
 ## Testing
 

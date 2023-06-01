@@ -1,11 +1,11 @@
-
+# Long running spike 
 from locust import LoadTestShape
 
 class MyCustomShape(LoadTestShape):
     stages = [
-        {"duration": 600, "users": 5, "spawn_rate": 1},
+        {"duration": 600, "users": 1, "spawn_rate": 1},
         {"duration": 1200, "users": 15, "spawn_rate": 1},
-        {"duration": 4800, "users": 1, "spawn_rate": 1},
+        {"duration": 2400, "users": 1, "spawn_rate": 1},
     ]
 
     def tick(self):
