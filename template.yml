@@ -125,12 +125,9 @@ Resources:
         - ApiId: !Ref Api
           Stage: !Sub '${StageName}'
       Throttle:
-        RateLimit: 500
-        BurstLimit: 1000
+        RateLimit: 5000
+        BurstLimit: 10000
       UsagePlanName: !Sub '${AppName}-usage-plan'
-      Quota:
-        Limit: 10000
-        Period: MONTH
   ApiUsagePlanKey:
     Type: 'AWS::ApiGateway::UsagePlanKey'
     Properties:

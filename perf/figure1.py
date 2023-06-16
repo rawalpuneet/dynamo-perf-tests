@@ -1,20 +1,26 @@
-
+# Burst 
 from locust import LoadTestShape
-
+import random
 class MyCustomShape(LoadTestShape):
     stages = [
-        {"duration": 600, "users": 5, "spawn_rate": 1},
-        {"duration": 1800, "users": 10, "spawn_rate": 1},
-        {"duration": 4800, "users": 1, "spawn_rate": 1},
+        {"duration": 90*60, "users": [5,11], "spawn_rate": 1},
+    
     ]
-
-
+    counter = -1
+    users = 0
+    
     def tick(self):
         run_time = self.get_run_time()
-
+        divider = round(run_time / 60)
+        if divider != self.counter:
+            self.counter = divider
+            self.users = random.randrange(self.stages[0]['users'][0], self.stages[0]['users'][1])
+            print(self.users)
+        
+        
         for stage in self.stages:
             if run_time < stage["duration"]:
-                tick_data = (stage["users"], stage["spawn_rate"])
+                tick_data = (self.users, stage["spawn_rate"])
                 return tick_data
 
         return None
