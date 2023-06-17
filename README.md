@@ -20,7 +20,7 @@ locust -f locustfile.py,figure1.py
 ```
 ### Running headless mode
 ```
-locust -f locustfile.py,figure1.py --headless --host https://zutctx9ynd.execute-api.us-east-1.amazonaws.com
+locust -f locustfile.py,figure1.py --headless --host [API-GATEWAY-ENDPOINT]
 ```
 
 ## Testing
