@@ -1,5 +1,11 @@
-AWSTemplateFormatVersion: 2010-09-09
-Description: An Amazon API Gateway REST API that integrates with an Amazon DynamoDB table.
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  load-test
+
+  Sample SAM Template for load-test
+
+
 Parameters:
   AppName:
     Type: String
@@ -7,8 +13,16 @@ Parameters:
     Description: API that can be used to test dynamodb
   StageName:
     Type: String
-    Default: v1
+    Default: prod
     Description: Name of API stage.
+
+Globals:
+  Function:
+    Runtime: python3.10
+    Environment:
+      Variables:
+        TableName: !Ref DynamoDBTable
+
 Resources:
   DynamoDBTable:
     Type: 'AWS::DynamoDB::Table'
@@ -56,73 +70,95 @@ Resources:
                 Resource: !Sub
                   - '${varTableArn}*'
                   - varTableArn: !GetAtt DynamoDBTable.Arn
-  Api:
-    Type: 'AWS::ApiGateway::RestApi'
+
+  findRow:
+    Type: AWS::Serverless::Function
     Properties:
-      Name: !Sub '${AppName}'
-      ApiKeySourceType: HEADER
-  LoadResource:
-    Type: 'AWS::ApiGateway::Resource'
+      Handler: src/actions.get
+      Policies:        
+        - DynamoDBCrudPolicy:
+            TableName: !Ref DynamoDBTable            
+           
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /load/{id}
+            Method: get
+            RestApiId: !Ref RestApi 
+  putRow:
+    Type: AWS::Serverless::Function
     Properties:
-      RestApiId: !Ref Api
-      ParentId: !GetAtt Api.RootResourceId
-      PathPart: 'load'
-  LoadMethodPost:
-    Type: 'AWS::ApiGateway::Method'
-    Properties:
-      RestApiId: !Ref Api
-      ResourceId: !Ref LoadResource
-      HttpMethod: POST
-      ApiKeyRequired: true
-      AuthorizationType: NONE
-      Integration:
-        Type: AWS
-        Credentials: !GetAtt APIGatewayRole.Arn
-        # Should always be POST when integrating with AWS services
-        IntegrationHttpMethod: POST
-        # More info: https://docs.aws.amazon.com/apigateway/api-reference/resource/integration/
-        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:dynamodb:action/PutItem'
-        PassthroughBehavior: WHEN_NO_TEMPLATES
-        RequestTemplates:
-          # Build the structure of the request that is sent when calling DynamoDB PutItem
-          # Using single-line, stringified JSON as the mapping template
-          # Example body when making API request: {"artist": "The Beatles", "album": "Abbey Road"}
-          # Use the unique id of the API context variable (eg: $context.requestId) as the DynamoDB item id
-          application/json: "{\"TableName\":\"traffic_test\",\"Item\":{\"PK\":{\"S\":\"PK.$context.requestId\"},\"SK\":{\"S\":\"SK.$context.requestId\"},\"json\":{\"S\":\"$input.path('$.json')\"},\"TTL\":{\"N\":\"$input.path('$.TTL')\"}}}"
-        IntegrationResponses:
-          - StatusCode: '200'
-            ResponseTemplates:
-              application/json: "{}"
-      MethodResponses:
-        - StatusCode: '200'
-  ApiDeployment:
-    Type: 'AWS::ApiGateway::Deployment'
-    DependsOn:
-      - LoadMethodPost    
-    Properties:
-      RestApiId: !Ref Api
-      StageName: !Sub '${StageName}'
-      StageDescription:
-        LoggingLevel: INFO
-        MetricsEnabled: True
+      Handler: src/actions.put
+      Policies:        
+        - DynamoDBCrudPolicy:
+            TableName: !Ref DynamoDBTable            
+           
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /load
+            Method: put
+            RestApiId: !Ref RestApi             
+  RestApi:
+      Type: AWS::Serverless::Api
+      Properties:
+          StageName: !Sub '${StageName}'
+          Cors:
+            AllowOrigin: "'*'"
+            AllowHeaders:
+              "'Content-Type,Authorization,X-Amz-Date'"
+          DefinitionBody:
+            swagger: "2.0"
+            info:
+              title:
+                Ref: AWS::StackName
+            x-amazon-apigateway-request-validators:
+              all:
+                validateRequestBody: true
+                validateRequestParameters: true
+            produces:
+              - application/json
+            paths:
+              "/load/{id}":
+                get:
+                  summary: 'Find Row'
+                  x-amazon-apigateway-integration:
+                    httpMethod: POST
+                    type: aws_proxy
+                    uri:
+                      Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${findRow.Arn}/invocations
+                  security:
+                    - CognitoUserPool: []
+              "/load":
+                put:
+                  summary: 'Put Row'
+                  x-amazon-apigateway-integration:
+                    httpMethod: POST
+                    type: aws_proxy
+                    uri:
+                      Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${putRow.Arn}/invocations
+                  security:
+                    - CognitoUserPool: []
 
   ApiKey:
     Type: 'AWS::ApiGateway::ApiKey'
     DependsOn:
-      - ApiDeployment
+      - RestApi
     Properties:
       Enabled: true
       Name: !Sub '${AppName}-apikey'
       StageKeys:
-        - RestApiId: !Ref Api
+        - RestApiId: !Ref RestApi
           StageName: !Sub '${StageName}'
   ApiUsagePlan:
     Type: 'AWS::ApiGateway::UsagePlan'
     DependsOn:
-      - ApiDeployment
+      - RestApi
     Properties:
       ApiStages:
-        - ApiId: !Ref Api
+        - ApiId: !Ref RestApi
           Stage: !Sub '${StageName}'
       Throttle:
         RateLimit: 5000
@@ -140,12 +176,16 @@ Resources:
         LogGroupName: /aws/apigateway/DDB-API-Gateway-Access
         RetentionInDays: 1
 
+
 Outputs:
+  DynamoDBTableName:
+    Description: DynamoDB test table name
+    Value: !Ref DynamoDBTable
   ApiRootUrl:
     Description: Root Url of the API
     Value: !Sub 
       - 'https://${ApiId}.execute-api.${AWS::Region}.amazonaws.com/${StageName}'
-      - ApiId: !Ref Api
+      - ApiId: !Ref RestApi
   ApiKeyId:
     Description: API Key Id
-    Value: !Ref ApiKey
+    Value: !Ref ApiKey    

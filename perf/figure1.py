@@ -3,7 +3,7 @@ from locust import LoadTestShape
 import random
 class MyCustomShape(LoadTestShape):
     stages = [
-        {"duration": 90*60, "users": [5,11], "spawn_rate": 1},
+        {"duration": 60, "users": [1,2], "spawn_rate": 1},
     
     ]
     counter = -1

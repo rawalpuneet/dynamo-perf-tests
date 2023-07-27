@@ -12,6 +12,15 @@
 
 ## Deployment Instructions
 
+### Create stack
+
+```
+sam init
+```
+
+```
+sam build && sam deploy --no-confirm-changeset
+```
 ## How it works
 
 ```
